@@ -10,7 +10,7 @@ const char* ssid = "Shaolin";
 const char* password = "luiz308he";
 
 // ===== API =====
-const char* apiUrl = "http://192.168.43.230:5045/api/rm";
+const char* apiUrl = "http://192.168.43.230:5045/api/registro";
 
 // LEDs
 #define LED_AZUL 2
