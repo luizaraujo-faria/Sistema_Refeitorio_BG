@@ -10,7 +10,7 @@ const char* ssid = "Paciente";
 const char* password = "p@cient3";
 
 // ===== API =====
-const char* apiUrl = "http://172.31.36.97:5045/api/registro";
+const char* apiUrl = "http://172.31.36.103:5045/api/Registro";
 
 // LEDs
 #define LED_AZUL 2
@@ -24,28 +24,48 @@ HardwareSerial rfidSerial(2);
 String tag = "";
 String ultimaTag = "";
 
+// CONTROLE DE PRESENÇA
+bool cartaoPresente = false;
+unsigned long ultimoSinal = 0;
+const int timeoutCartao = 1000;
+
 unsigned long ultimoTempoLeitura = 0;
-const int intervaloLeitura = 3000;
+const int intervaloLeitura = 5000;
 
 // ===== WIFI =====
 void conectarWiFi() {
+
   lcd.clear();
   lcd.setCursor(0, 0);
   lcd.print("Conectando WiFi");
 
   WiFi.begin(ssid, password);
 
-  while (WiFi.status() != WL_CONNECTED) {
+  int tentativas = 0;
+
+  while (WiFi.status() != WL_CONNECTED && tentativas < 20) {
     delay(500);
     Serial.print(".");
+    tentativas++;
   }
 
-  Serial.println("\nWiFi conectado!");
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\nWiFi conectado!");
 
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("WiFi conectado");
-  delay(1500);
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("WiFi conectado");
+    delay(1500);
+  } else {
+    Serial.println("\nFalha WiFi!");
+
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Falha WiFi");
+    lcd.setCursor(0, 1);
+    lcd.print("Sem conexao");
+    delay(2000);
+  }
 }
 
 // 🔊 Feedback sonoro
@@ -56,8 +76,12 @@ void beep(int freq, int tempo) {
 }
 
 // 🌐 ENVIO API
-bool enviarParaAPI(String uid) {
-  if (WiFi.status() != WL_CONNECTED) return false;
+int enviarParaAPI(String uid) {
+
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("WiFi desconectado");
+    return -1;
+  }
 
   HTTPClient http;
   http.begin(apiUrl);
@@ -72,7 +96,7 @@ bool enviarParaAPI(String uid) {
 
   http.end();
 
-  return (code > 0);
+  return code;
 }
 
 void setup() {
@@ -88,7 +112,6 @@ void setup() {
 
   digitalWrite(LED_AZUL, LOW);
   digitalWrite(LED_AMARELO, LOW);
-  digitalWrite(BUZZER, LOW);
   noTone(BUZZER);
 
   rfidSerial.begin(9600, SERIAL_8N1, 16, 17);
@@ -108,14 +131,32 @@ void setup() {
 }
 
 void loop() {
+
+  // 🔄 Reconecta WiFi automaticamente
+  if (WiFi.status() != WL_CONNECTED) {
+    conectarWiFi();
+  }
+
+  // 🔥 DETECTA REMOÇÃO DO CARTÃO
+  if (cartaoPresente && (millis() - ultimoSinal > timeoutCartao)) {
+    Serial.println("Cartao removido");
+    cartaoPresente = false;
+    ultimaTag = "";
+  }
+
   while (rfidSerial.available()) {
+
     char c = rfidSerial.read();
+
+    // 🔥 atualiza sinal (cartão ainda presente)
+    ultimoSinal = millis();
 
     if (c == 0x02) {
       tag = "";
     }
     else if (c == 0x03) {
       verificarLeitura(tag);
+      tag = "";
     }
     else {
       tag += c;
@@ -123,94 +164,87 @@ void loop() {
   }
 }
 
-void verificarLeitura(String uid) {
-
-  unsigned long agora = millis();
-
-  if (uid == ultimaTag && (agora - ultimoTempoLeitura < intervaloLeitura)) {
-    return;
-  }
-
-  ultimaTag = uid;
-  ultimoTempoLeitura = agora;
-
-  processarTag(uid);
-}
-
-void processarTag(String uid) {
-
-  Serial.println("\nCartao detectado!");
-  Serial.print("RAW: ");
-  Serial.println(uid);
+void verificarLeitura(String uidBruto) {
 
   // 🔥 LIMPEZA DO UID
   String uidLimpo = "";
 
-  for (int i = 0; i < uid.length(); i++) {
-    char c = uid[i];
+  for (int i = 0; i < uidBruto.length(); i++) {
+    char c = uidBruto[i];
 
     if (isDigit(c) || (c >= 'A' && c <= 'F')) {
       uidLimpo += c;
     }
   }
 
-  // corta para 12
   if (uidLimpo.length() >= 12) {
     uidLimpo = uidLimpo.substring(0, 12);
   }
 
+  Serial.println("\nCartao detectado!");
   Serial.print("UID LIMPO: ");
   Serial.println(uidLimpo);
 
-  lcd.clear();
+  // ❌ inválido
+  if (uidLimpo.length() != 12) return;
 
-  // ❌ leitura inválida
-  if (uidLimpo.length() != 12) {
+  // 👻 UID fantasma
+  if (uidLimpo == "000000000000") return;
 
-    Serial.println("FALHA NA LEITURA");
-
-    lcd.setCursor(0, 0);
-    lcd.print("Falha leitura");
-
-    digitalWrite(LED_AMARELO, HIGH);
-    beep(500, 200);
-
-    delay(1500);
-
-    digitalWrite(LED_AMARELO, LOW);
-
-    lcd.clear();
-    lcd.setCursor(0, 0);
-    lcd.print("Aproxime cartao");
-
+  // 🔁 BLOQUEIO REAL (cartão ainda presente)
+  if (cartaoPresente && uidLimpo == ultimaTag) {
+    Serial.println("Cartao ainda presente - ignorado");
     return;
   }
 
-  // ✅ MOSTRA UID
+  // ✅ NOVA LEITURA
+  cartaoPresente = true;
+  ultimaTag = uidLimpo;
+
+  processarTag(uidLimpo);
+}
+
+void processarTag(String uid) {
+
+  lcd.clear();
+
   lcd.setCursor(0, 0);
   lcd.print("UID:");
   lcd.setCursor(0, 1);
-  lcd.print(uidLimpo);
+  lcd.print(uid);
 
-  // 🌐 ENVIO API
-  bool enviado = enviarParaAPI(uidLimpo);
+  int resposta = enviarParaAPI(uid);
 
-  if (enviado) {
+  if (resposta > 0 && resposta < 300) {
+
     Serial.println("ENVIADO PARA API");
 
     lcd.setCursor(0, 2);
-    lcd.print("Enviado API");
+    lcd.print("Sucesso API");
 
     digitalWrite(LED_AZUL, HIGH);
-    beep(2000, 150);
+    beep(2000, 350);
+
   } else {
+
     Serial.println("ERRO AO ENVIAR");
 
     lcd.setCursor(0, 2);
-    lcd.print("Erro envio");
+    lcd.print("Erro API");
+
+    lcd.setCursor(0, 3);
+
+    if (resposta == -1) {
+      lcd.print("Sem WiFi");
+    } else {
+      lcd.print("Cod:");
+      lcd.print(resposta);
+    }
 
     digitalWrite(LED_AMARELO, HIGH);
-    beep(500, 150);
+    beep(500, 700);
+    // delay(100);
+    // beep(500, 300);
   }
 
   delay(2000);
