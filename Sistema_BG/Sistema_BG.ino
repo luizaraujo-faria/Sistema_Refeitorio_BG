@@ -3,37 +3,86 @@
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
 
+// =====================================================
+// LCD
+// =====================================================
+
 LiquidCrystal_I2C lcd(0x27, 20, 4);
 
-// ===== WIFI =====
-const char* ssid = "Paciente";
-const char* password = "p@cient3";
+// =====================================================
+// WIFI
+// =====================================================
 
-// ===== API =====
-const char* apiUrl = "http://172.31.36.103:5045/api/Registro";
+const char* ssid = "Família_Rodrigues";
+const char* password = "leaodejuda262408";
 
-// LEDs
-#define LED_AZUL 2
-#define LED_AMARELO 15
+// =====================================================
+// API
+// =====================================================
 
-// Buzzer
+const char* apiUrl = "http://192.168.0.103:5045/api/Registro";
+
+// =====================================================
+// BUZZER
+// =====================================================
+
 #define BUZZER 26
 
-HardwareSerial rfidSerial(2);
+// =====================================================
+// SCANNER
+// =====================================================
 
-String tag = "";
-String ultimaTag = "";
+const int pinoRX = 32;
+const int pinoTX = 33;
 
-// CONTROLE DE PRESENÇA
-bool cartaoPresente = false;
-unsigned long ultimoSinal = 0;
-const int timeoutCartao = 1000;
+HardwareSerial leitor(1);
+
+// =====================================================
+// CONTROLE DE DUPLICIDADE
+// =====================================================
+
+String ultimoCodigo = "";
 
 unsigned long ultimoTempoLeitura = 0;
-const int intervaloLeitura = 5000;
 
-// ===== WIFI =====
+const unsigned long intervaloLeitura = 3000;
+
+// =====================================================
+// BEEP SUCESSO
+// =====================================================
+
+void beepSucesso() {
+
+  tone(BUZZER, 2000);
+  delay(120);
+  noTone(BUZZER);
+}
+
+// =====================================================
+// BEEP ERRO
+// =====================================================
+
+void beepErro() {
+
+  for (int i = 0; i < 3; i++) {
+
+    tone(BUZZER, 180);
+
+    delay(250);
+
+    noTone(BUZZER);
+
+    delay(120);
+  }
+}
+
+// =====================================================
+// CONECTAR WIFI
+// =====================================================
+
 void conectarWiFi() {
+
+  Serial.print("Conectando WiFi");
 
   lcd.clear();
   lcd.setCursor(0, 0);
@@ -41,220 +90,213 @@ void conectarWiFi() {
 
   WiFi.begin(ssid, password);
 
-  int tentativas = 0;
+  while (WiFi.status() != WL_CONNECTED) {
 
-  while (WiFi.status() != WL_CONNECTED && tentativas < 20) {
     delay(500);
+
     Serial.print(".");
-    tentativas++;
-  }
-
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("\nWiFi conectado!");
-
-    lcd.clear();
-    lcd.setCursor(0, 0);
-    lcd.print("WiFi conectado");
-    delay(1500);
-  } else {
-    Serial.println("\nFalha WiFi!");
-
-    lcd.clear();
-    lcd.setCursor(0, 0);
-    lcd.print("Falha WiFi");
     lcd.setCursor(0, 1);
-    lcd.print("Sem conexao");
-    delay(2000);
+    lcd.print("Aguarde...");
   }
+
+  Serial.println();
+  Serial.println("WiFi conectado!");
+
+  Serial.print("IP: ");
+  Serial.println(WiFi.localIP());
+
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("WiFi conectado");
+
+  lcd.setCursor(0, 1);
+  lcd.print(WiFi.localIP());
+
+  delay(2000);
 }
 
-// 🔊 Feedback sonoro
-void beep(int freq, int tempo) {
-  tone(BUZZER, freq);
-  delay(tempo);
-  noTone(BUZZER);
-}
+// =====================================================
+// ENVIO PARA API
+// =====================================================
 
-// 🌐 ENVIO API
-int enviarParaAPI(String uid) {
+bool enviarParaAPI(String codigo) {
 
   if (WiFi.status() != WL_CONNECTED) {
+
     Serial.println("WiFi desconectado");
-    return -1;
+
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("WiFi caiu");
+
+    return false;
   }
 
   HTTPClient http;
+
   http.begin(apiUrl);
+
   http.addHeader("Content-Type", "application/json");
 
-  String json = "{\"uid\":\"" + uid + "\"}";
+  String json = "{\"RM\":\"" + codigo + "\"}";
 
-  int code = http.POST(json);
+  Serial.println("Enviando:");
+  Serial.println(json);
+
+  int httpCode = http.POST(json);
 
   Serial.print("HTTP Code: ");
-  Serial.println(code);
+  Serial.println(httpCode);
+
+  String resposta = http.getString();
+
+  Serial.println("Resposta API:");
+  Serial.println(resposta);
 
   http.end();
 
-  return code;
+  return (httpCode >= 200 && httpCode < 300);
 }
 
-void setup() {
-  Serial.begin(115200);
+// =====================================================
+// PROCESSAR CARTAO
+// =====================================================
 
-  Wire.begin(21, 22);
-  lcd.init();
-  lcd.backlight();
+void processarCodigo(String codigo) {
 
-  pinMode(LED_AZUL, OUTPUT);
-  pinMode(LED_AMARELO, OUTPUT);
-  pinMode(BUZZER, OUTPUT);
+  codigo.trim();
 
-  digitalWrite(LED_AZUL, LOW);
-  digitalWrite(LED_AMARELO, LOW);
-  noTone(BUZZER);
+  if (codigo.length() == 0)
+    return;
 
-  rfidSerial.begin(9600, SERIAL_8N1, 16, 17);
+  unsigned long agora = millis();
 
-  lcd.setCursor(0, 0);
-  lcd.print("Sistema RFID");
-  lcd.setCursor(0, 1);
-  lcd.print("Inicializando...");
+  if (codigo == ultimoCodigo &&
+      (agora - ultimoTempoLeitura) < intervaloLeitura) {
 
-  Serial.println("=== SISTEMA RFID + API ===");
+    Serial.println("Leitura ignorada");
 
-  conectarWiFi();
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Leitura repetida");
 
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("Aproxime cartao");
-}
+    delay(1000);
 
-void loop() {
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Aproxime cartao");
 
-  // 🔄 Reconecta WiFi automaticamente
-  if (WiFi.status() != WL_CONNECTED) {
-    conectarWiFi();
-  }
-
-  // 🔥 DETECTA REMOÇÃO DO CARTÃO
-  if (cartaoPresente && (millis() - ultimoSinal > timeoutCartao)) {
-    Serial.println("Cartao removido");
-    cartaoPresente = false;
-    ultimaTag = "";
-  }
-
-  while (rfidSerial.available()) {
-
-    char c = rfidSerial.read();
-
-    // 🔥 atualiza sinal (cartão ainda presente)
-    ultimoSinal = millis();
-
-    if (c == 0x02) {
-      tag = "";
-    }
-    else if (c == 0x03) {
-      verificarLeitura(tag);
-      tag = "";
-    }
-    else {
-      tag += c;
-    }
-  }
-}
-
-void verificarLeitura(String uidBruto) {
-
-  // 🔥 LIMPEZA DO UID
-  String uidLimpo = "";
-
-  for (int i = 0; i < uidBruto.length(); i++) {
-    char c = uidBruto[i];
-
-    if (isDigit(c) || (c >= 'A' && c <= 'F')) {
-      uidLimpo += c;
-    }
-  }
-
-  if (uidLimpo.length() >= 12) {
-    uidLimpo = uidLimpo.substring(0, 12);
-  }
-
-  Serial.println("\nCartao detectado!");
-  Serial.print("UID LIMPO: ");
-  Serial.println(uidLimpo);
-
-  // ❌ inválido
-  if (uidLimpo.length() != 12) return;
-
-  // 👻 UID fantasma
-  if (uidLimpo == "000000000000") return;
-
-  // 🔁 BLOQUEIO REAL (cartão ainda presente)
-  if (cartaoPresente && uidLimpo == ultimaTag) {
-    Serial.println("Cartao ainda presente - ignorado");
     return;
   }
 
-  // ✅ NOVA LEITURA
-  cartaoPresente = true;
-  ultimaTag = uidLimpo;
+  ultimoCodigo = codigo;
+  ultimoTempoLeitura = agora;
 
-  processarTag(uidLimpo);
-}
-
-void processarTag(String uid) {
+  Serial.println();
+  Serial.println("================================");
+  Serial.print("Cartao detectado: ");
+  Serial.println(codigo);
+  Serial.println("================================");
 
   lcd.clear();
 
   lcd.setCursor(0, 0);
-  lcd.print("UID:");
+  lcd.print("Cartao:");
+
   lcd.setCursor(0, 1);
-  lcd.print(uid);
+  lcd.print(codigo);
 
-  int resposta = enviarParaAPI(uid);
+  bool sucesso = enviarParaAPI(codigo);
 
-  if (resposta > 0 && resposta < 300) {
+  if (sucesso) {
 
-    Serial.println("ENVIADO PARA API");
+    Serial.println("ENVIADO COM SUCESSO");
 
     lcd.setCursor(0, 2);
-    lcd.print("Sucesso API");
+    lcd.print("Registro OK");
 
-    digitalWrite(LED_AZUL, HIGH);
-    beep(2000, 350);
-
-  } else {
+    beepSucesso();
+  }
+  else {
 
     Serial.println("ERRO AO ENVIAR");
 
     lcd.setCursor(0, 2);
     lcd.print("Erro API");
 
-    lcd.setCursor(0, 3);
-
-    if (resposta == -1) {
-      lcd.print("Sem WiFi");
-    } else {
-      lcd.print("Cod:");
-      lcd.print(resposta);
-    }
-
-    digitalWrite(LED_AMARELO, HIGH);
-    beep(500, 700);
-    // delay(100);
-    // beep(500, 300);
+    beepErro();
   }
 
-  delay(2000);
-
-  digitalWrite(LED_AZUL, LOW);
-  digitalWrite(LED_AMARELO, LOW);
+  delay(2500);
 
   lcd.clear();
+
   lcd.setCursor(0, 0);
   lcd.print("Aproxime cartao");
+}
 
-  Serial.println("Aguardando...");
+// =====================================================
+// SETUP
+// =====================================================
+
+void setup() {
+
+  Serial.begin(115200);
+
+  pinMode(BUZZER, OUTPUT);
+  digitalWrite(BUZZER, LOW);
+
+  Wire.begin(21, 22);
+
+  lcd.init();
+  lcd.backlight();
+
+  lcd.clear();
+
+  lcd.setCursor(0, 0);
+  lcd.print("Inicializando");
+
+  Serial.println();
+  Serial.println("=== SISTEMA INICIADO ===");
+
+  conectarWiFi();
+
+  leitor.begin(9600, SERIAL_8N1, pinoRX, pinoTX);
+
+  Serial.println("Scanner pronto");
+
+  lcd.clear();
+
+  lcd.setCursor(0, 0);
+  lcd.print("Scanner pronto");
+
+  delay(1500);
+
+  lcd.clear();
+
+  lcd.setCursor(0, 0);
+  lcd.print("Aproxime cartao");
+}
+
+// =====================================================
+// LOOP
+// =====================================================
+
+void loop() {
+
+  if (leitor.available()) {
+
+    String codigoLido = leitor.readStringUntil('\n');
+
+    codigoLido.trim();
+
+    if (codigoLido.length() > 0) {
+
+      Serial.print("RAW: [");
+      Serial.print(codigoLido);
+      Serial.println("]");
+
+      processarCodigo(codigoLido);
+    }
+  }
 }
