@@ -2,6 +2,7 @@
 #include <HTTPClient.h>
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
+#include <ArduinoJson.h>
 
 // =====================================================
 // LCD
@@ -15,12 +16,14 @@ LiquidCrystal_I2C lcd(0x27, 20, 4);
 
 const char* ssid = "Família_Rodrigues";
 const char* password = "leaodejuda262408";
+// const char* ssid = "Shaolin";
+// const char* password = "luiz308he";
 
 // =====================================================
 // API
 // =====================================================
-
-const char* apiUrl = "http://192.168.0.103:5045/api/Registro";
+const char* apiUrl = "http://192.168.0.105:5045/api/Registro";
+// const char* apiUrl = "http://192.168.43.124:5045/api/Registro";
 
 // =====================================================
 // BUZZER
@@ -152,6 +155,37 @@ bool enviarParaAPI(String codigo) {
 
   Serial.println("Resposta API:");
   Serial.println(resposta);
+
+  // ============================
+  // CAPTURA ERRO
+  // ============================
+
+  DynamicJsonDocument doc(512);
+
+  DeserializationError erro = deserializeJson(doc, resposta);
+
+  if (!erro) {
+
+    String mensagem = doc["mensagem"] | "Sem mensagem";
+
+    Serial.println();
+    Serial.println("========== MENSAGEM ==========");
+    Serial.println(mensagem);
+    Serial.println("==============================");
+
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print(mensagem);
+  }
+  else {
+
+    Serial.println("Erro ao interpretar JSON:");
+    Serial.println(erro.c_str());
+
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Erro JSON");
+  }
 
   http.end();
 
