@@ -22,7 +22,7 @@ const char* password = "leaodejuda262408";
 // =====================================================
 // API
 // =====================================================
-const char* apiUrl = "http://192.168.0.105:5045/api/Registro";
+const char* apiUrl = "http://192.168.0.104:5045/api/Registro";
 // const char* apiUrl = "http://192.168.43.124:5045/api/Registro";
 
 // =====================================================
@@ -115,6 +115,8 @@ void conectarWiFi() {
   lcd.setCursor(0, 1);
   lcd.print(WiFi.localIP());
 
+  beepSucesso();
+
   delay(2000);
 }
 
@@ -166,7 +168,7 @@ bool enviarParaAPI(String codigo) {
 
   if (!erro) {
 
-    String mensagem = doc["mensagem"] | "Sem mensagem";
+    String mensagem = doc["erro"] | "-";
 
     Serial.println();
     Serial.println("========== MENSAGEM ==========");
@@ -174,7 +176,7 @@ bool enviarParaAPI(String codigo) {
     Serial.println("==============================");
 
     lcd.clear();
-    lcd.setCursor(0, 0);
+    lcd.setCursor(0, 1);
     lcd.print(mensagem);
   }
   else {
@@ -182,9 +184,9 @@ bool enviarParaAPI(String codigo) {
     Serial.println("Erro ao interpretar JSON:");
     Serial.println(erro.c_str());
 
-    lcd.clear();
-    lcd.setCursor(0, 0);
-    lcd.print("Erro JSON");
+    // lcd.clear();
+    // lcd.setCursor(0, 0);
+    // lcd.print("ERRO AO IDENTIFICAR");
   }
 
   http.end();
@@ -218,7 +220,7 @@ void processarCodigo(String codigo) {
 
     lcd.clear();
     lcd.setCursor(0, 0);
-    lcd.print("Aproxime cartao");
+    lcd.print("Aproxime o cartao");
 
     return;
   }
@@ -246,8 +248,8 @@ void processarCodigo(String codigo) {
 
     Serial.println("ENVIADO COM SUCESSO");
 
-    lcd.setCursor(0, 2);
-    lcd.print("Registro OK");
+    lcd.setCursor(0, 1);
+    lcd.print("REGISTRO OK");
 
     beepSucesso();
   }
@@ -255,8 +257,8 @@ void processarCodigo(String codigo) {
 
     Serial.println("ERRO AO ENVIAR");
 
-    lcd.setCursor(0, 2);
-    lcd.print("Erro API");
+    lcd.setCursor(0, 0);
+    lcd.print("ERRO AO ENVIAR");
 
     beepErro();
   }
