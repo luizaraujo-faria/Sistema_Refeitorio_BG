@@ -168,7 +168,7 @@ bool enviarParaAPI(String codigo) {
 
   if (!erro) {
 
-    String mensagem = doc["erro"] | "-";
+    String mensagem = doc["mensagem"] | "Erro desconhecido";
 
     Serial.println();
     Serial.println("========== MENSAGEM ==========");
@@ -248,7 +248,7 @@ void processarCodigo(String codigo) {
 
     Serial.println("ENVIADO COM SUCESSO");
 
-    lcd.setCursor(0, 1);
+    lcd.setCursor(0,0);
     lcd.print("REGISTRO OK");
 
     beepSucesso();
